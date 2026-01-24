@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from src.pipeline.artifacts import write_cleaned_csv, write_report_json, read_report_json, cleaned_csv_path, write_plan_json
 from src.pipeline.profile import profile_dataframe, read_uploaded_csv
 from src.pipeline.planner import PlanError, generate_cleaning_plan
+from src.pipeline.executor import ExecutionError, execute_plan
 from src.tools.transforms import basic_clean
 
 
@@ -157,4 +158,76 @@ def plan_cleaning(file: UploadFile = File(...)) -> dict[str, Any]:
         "artifacts": {
             "plan_json": str(plan_path),
         },
+    }
+
+@router.post("/clean/llm")
+def clean_llm(file: UploadFile = File(...)) -> dict[str, Any]:
+    """
+    Agentic cleaning:
+    - Profile csv
+    - Use OpenAI to generate a structured cleaning plan
+    - Execute the plan deterministically
+    - Save artifacts (cleaned csv, report json, plan json)
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="missing filename")
+
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="only .csv files are supported")
+
+    df = read_uploaded_csv(file)
+
+    if df.shape[1] == 0:
+        raise HTTPException(status_code=400, detail="no columns found in csv")
+
+    job_id = _new_job_id()
+
+    # profile first (used for both plan + report)
+    before = profile_dataframe(df, filename=file.filename)
+
+    # plan (llm)
+    try:
+        plan = generate_cleaning_plan(before)
+    except PlanError as e:
+        raise HTTPException(status_code=500, detail=f"planning failed: {e}")
+
+    # execute
+    try:
+        cleaned_df, exec_report = execute_plan(df, plan)
+    except ExecutionError as e:
+        raise HTTPException(status_code=500, detail=f"execution failed: {e}")
+
+    after = profile_dataframe(cleaned_df, filename=file.filename)
+
+    plan_dict = plan.model_dump()
+
+    report = {
+        "job_id": job_id,
+        "filename": file.filename,
+        "cleaning_mode": "llm",
+        "plan": plan_dict,
+        "execution_report": exec_report,
+        "before": before,
+        "after": after,
+    }
+
+    # save artifacts
+    cleaned_path = write_cleaned_csv(cleaned_df, job_id)
+    report_path = write_report_json(report, job_id)
+    plan_path = write_plan_json(plan_dict, job_id)
+
+    return {
+        "job_id": job_id,
+        "filename": file.filename,
+        "cleaning_mode": "llm",
+        "plan": plan_dict,
+        "execution_report": exec_report,
+        "artifacts": {
+            "cleaned_csv": str(cleaned_path),
+            "report_json": str(report_path),
+            "plan_json": str(plan_path),
+        },
+        "before": before,
+        "after": after,
+        "cleaned_preview_rows": cleaned_df.head(10).fillna("").to_dict(orient="records"),
     }

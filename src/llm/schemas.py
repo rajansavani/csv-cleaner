@@ -26,7 +26,7 @@ class ParseNumeric(BaseModel):
     columns: list[str] = Field(default_factory=list)
     numeric_type: Literal["int", "float"] = "float"
     allow_currency: bool = Field(default=False, description="strip currency symbols/commas")
-    allow_thousands_seperators: bool = Field(default=True, description="handle 1,234 or 1.234.567 formats")
+    allow_thousands_separators: bool = Field(default=True, description="handle 1,234 or 1.234.567 formats")
     fix_common_typos: bool = Field(default=True, description="fix small issues like letter O vs. 0 in numbers")
 
 class ParseDates(BaseModel):

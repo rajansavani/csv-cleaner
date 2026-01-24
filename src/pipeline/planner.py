@@ -8,6 +8,7 @@ from src.llm.client import LLMError, OpenAIClient
 from src.llm.prompts import build_planner_prompt
 from src.llm.schemas import CleaningPlan
 
+
 class PlanError(RuntimeError):
     pass
 
@@ -20,10 +21,10 @@ def generate_cleaning_plan(profile: dict[str, Any], *, model: str = "gpt-4o-mini
     client = OpenAIClient(model=model)
 
     try:
-        raw = client.generate_json(system=prompts, user=prompts["user"])
+        raw = client.generate_json(system=prompts["system"], user=prompts["user"])
     except LLMError as e:
         raise PlanError(str(e))
-    
+
     try:
         return CleaningPlan.model_validate(raw)
     except ValidationError as e:

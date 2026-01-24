@@ -6,8 +6,10 @@ from typing import Any
 
 from openai import OpenAI
 
+
 class LLMError(RuntimeError):
     pass
+
 
 class OpenAIClient:
     def __init__(self, api_key: str | None = None, model: str = "gpt-4o-mini") -> None:
@@ -19,29 +21,29 @@ class OpenAIClient:
         self._model = model
 
     def generate_json(self, *, system: str, user: str) -> dict[str, Any]:
-        """
-        Ask the model for a JSON object only and parse it.
-        """
+        if not isinstance(system, str):
+            raise LLMError(f"System prompt must be a string, got {type(system)}")
+        if not isinstance(user, str):
+            raise LLMError(f"User prompt must be a string, got {type(user)}")
+
         try:
             resp = self._client.chat.completions.create(
                 model=self._model,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
-
                 ],
                 temperature=0.2,
                 response_format={"type": "json_object"},
             )
         except Exception as e:
             raise LLMError(f"OpenAI request failed: {e}")
-        
+
         content = (resp.choices[0].message.content or "").strip()
         if not content:
             raise LLMError("OpenAI returned empty response")
-        
+
         try:
             return json.loads(content)
         except Exception as e:
-            snippet = content[:500]
-            raise LLMError(f"Failed to parse json: {e}. Raw response starts with: {snippet!r}")
+            raise LLMError(f"Failed to parse json: {e}. Raw response starts with: {content[:300]!r}")
