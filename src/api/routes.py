@@ -7,8 +7,9 @@ from uuid import uuid4
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from src.pipeline.artifacts import write_cleaned_csv, write_report_json, read_report_json, cleaned_csv_path
+from src.pipeline.artifacts import write_cleaned_csv, write_report_json, read_report_json, cleaned_csv_path, write_plan_json
 from src.pipeline.profile import profile_dataframe, read_uploaded_csv
+from src.pipeline.planner import PlanError, generate_cleaning_plan
 from src.tools.transforms import basic_clean
 
 
@@ -117,3 +118,43 @@ def download_cleaned_csv(job_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="job_id not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to read csv: {e}")
+
+@router.post("/plan")
+def plan_cleaning(file: UploadFile = File(...)) -> dict[str, Any]:
+    """
+    Generate an LLM cleaning plan (JSON) from an uploaded CSV.
+    This does not modify the data yet, just generates a plan.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="missing filename")
+
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="only .csv files are supported")
+
+    df = read_uploaded_csv(file)
+
+    if df.shape[1] == 0:
+        raise HTTPException(status_code=400, detail="no columns found in csv")
+
+    profile = profile_dataframe(df, filename=file.filename)
+
+    job_id = _new_job_id()
+
+    try:
+        plan = generate_cleaning_plan(profile)
+    except PlanError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    plan_dict = plan.model_dump()
+
+    plan_path = write_plan_json(plan_dict, job_id)
+
+    return {
+        "job_id": job_id,
+        "filename": file.filename,
+        "model": "gpt-4o-mini",
+        "plan": plan_dict,
+        "artifacts": {
+            "plan_json": str(plan_path),
+        },
+    }
