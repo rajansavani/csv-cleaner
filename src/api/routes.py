@@ -11,6 +11,7 @@ from src.pipeline.artifacts import write_cleaned_csv, write_report_json, read_re
 from src.pipeline.profile import profile_dataframe, read_uploaded_csv
 from src.pipeline.planner import PlanError, generate_cleaning_plan
 from src.pipeline.executor import ExecutionError, execute_plan
+from src.pipeline.validate import PlanValidationError, ensure_valid_plan
 from src.tools.transforms import basic_clean
 
 
@@ -140,11 +141,21 @@ def plan_cleaning(file: UploadFile = File(...)) -> dict[str, Any]:
     profile = profile_dataframe(df, filename=file.filename)
 
     job_id = _new_job_id()
-
     try:
         plan = generate_cleaning_plan(profile)
+        plan_validation = ensure_valid_plan(plan, df_columns=list(df.columns))
     except PlanError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    except PlanValidationError as e:
+        # semantic plan issues -> 422
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "plan validation failed",
+                "errors": e.errors,
+                "warnings": e.warnings,
+            },
+        )
 
     plan_dict = plan.model_dump()
 
@@ -155,6 +166,11 @@ def plan_cleaning(file: UploadFile = File(...)) -> dict[str, Any]:
         "filename": file.filename,
         "model": "gpt-4o-mini",
         "plan": plan_dict,
+        "plan_validation": {
+            "ok": True,
+            "warnings": plan_validation.warnings,
+            "final_columns": plan_validation.final_columns,
+        },
         "artifacts": {
             "plan_json": str(plan_path),
         },
@@ -188,14 +204,31 @@ def clean_llm(file: UploadFile = File(...)) -> dict[str, Any]:
     # plan (llm)
     try:
         plan = generate_cleaning_plan(before)
+        plan_validation = ensure_valid_plan(plan, df_columns=list(df.columns))
     except PlanError as e:
         raise HTTPException(status_code=500, detail=f"planning failed: {e}")
+    except PlanValidationError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "plan validation failed",
+                "errors": e.errors,
+                "warnings": e.warnings,
+            },
+        )
 
     # execute
     try:
         cleaned_df, exec_report = execute_plan(df, plan)
     except ExecutionError as e:
         raise HTTPException(status_code=500, detail=f"execution failed: {e}")
+
+    # attach plan validation warnings to the execution report (if any)
+    if plan_validation.warnings:
+        exec_report.setdefault("warnings", [])
+        exec_report["warnings"].extend(
+            [{"type": "plan_validation", **w} for w in plan_validation.warnings]
+        )
 
     after = profile_dataframe(cleaned_df, filename=file.filename)
 
@@ -221,6 +254,11 @@ def clean_llm(file: UploadFile = File(...)) -> dict[str, Any]:
         "filename": file.filename,
         "cleaning_mode": "llm",
         "plan": plan_dict,
+        "plan_validation": {
+            "ok": True,
+            "warnings": plan_validation.warnings,
+            "final_columns": plan_validation.final_columns,
+        },
         "execution_report": exec_report,
         "artifacts": {
             "cleaned_csv": str(cleaned_path),
