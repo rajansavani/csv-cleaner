@@ -60,6 +60,9 @@ These were generated using the included sample dataset:
 
 - `data/raw/messy_IMDB_dataset.csv`
 
+Dataset source (Kaggle):
+- https://www.kaggle.com/datasets/davidfuenteherraiz/messy-imdb-dataset
+
 ---
 
 ## Quickstart
