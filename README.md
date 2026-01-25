@@ -13,7 +13,7 @@ This tool does not directly modify your data or run arbitrary code.
 
 ---
 
-## API docs
+## API Docs
 
 Swagger UI screenshot:
 
@@ -48,7 +48,7 @@ Explore everything interactively at /docs.
 
 ---
 
-## Example outputs (committed)
+## Example Outputs
 
 Example outputs are committed so you can review the project without running it:
 
@@ -92,7 +92,7 @@ Create a local .env file in the repo root (not tracked by git):
 
 From the repo root:
 
-- uvicorn src.api.app:app --reload
+- `uvicorn src.api.app:app --reload`
 
 Then open:
 
@@ -109,7 +109,7 @@ The script calls `/health`, `/profile`, `/plan`, and `/clean/llm` using the samp
 
 ---
 
-## Project structure
+## Project Structure
 
 ```
 csv-cleaner/
