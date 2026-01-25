@@ -237,6 +237,7 @@ htmlcov/
 # env vars / secrets
 .env
 .env.*
+!.env.example
 
 # runtime outputs / artifacts
 outputs/
