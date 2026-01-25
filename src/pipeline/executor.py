@@ -192,9 +192,17 @@ def _parse_numeric(
     return out, stats
 
 
-def _parse_dates(df: pd.DataFrame, columns: list[str], day_first: bool = False):
+def _parse_dates(
+    df: pd.DataFrame,
+    *,
+    columns: list[str],
+    day_first: bool = False,
+    output_format: str | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
     out = df.copy()
-    per_col: dict[str, dict] = {}
+    per_col: dict[str, dict[str, Any]] = {}
+
+    fmt = output_format or "%Y-%m-%d"
 
     for col in columns:
         if col not in out.columns:
@@ -203,7 +211,6 @@ def _parse_dates(df: pd.DataFrame, columns: list[str], day_first: bool = False):
 
         before = out[col]
 
-        # normalize empties to NA
         cleaned = before.replace("", pd.NA)
 
         # pandas removed infer_datetime_format in newer versions
@@ -221,15 +228,23 @@ def _parse_dates(df: pd.DataFrame, columns: list[str], day_first: bool = False):
                 dayfirst=day_first,
             )
 
-        out[col] = dt
+        # keep dates as strings for consistent json + downstream validation
+        try:
+            formatted = dt.dt.strftime(fmt).fillna("")
+        except Exception as e:
+            raise ExecutionError(f"invalid output_format for parse_dates: {fmt} ({e})")
+
+        out[col] = formatted
 
         per_col[col] = {
             "status": "ok",
             "parsed_non_null": int(dt.notna().sum()),
             "total": int(len(dt)),
+            "output_format": fmt,
         }
 
     return out, per_col
+
 
 def _run_validations(df: pd.DataFrame, plan: CleaningPlan) -> dict[str, Any]:
     """
