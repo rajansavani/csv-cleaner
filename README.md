@@ -4,10 +4,10 @@ CSVCleaner is a small FastAPI service that profiles a CSV and can clean it end-t
 
 The main idea is an agentic workflow that stays reproducible:
 
-- the LLM proposes a structured cleaning plan (JSON)
-- the plan is validated (schema + semantic checks)
-- execution is deterministic via pandas transforms
-- artifacts are saved (cleaned csv, plan json, report json)
+- The LLM proposes a structured cleaning plan (JSON)
+- The plan is validated (schema + semantic checks)
+- Execution is deterministic via pandas transforms
+- Artifacts are saved (cleaned csv, plan json, report json)
 
 This tool does not directly modify your data or run arbitrary code.
 
@@ -20,6 +20,26 @@ Swagger UI screenshot:
 ![swagger ui](reports/figures/docs_example.png)
 
 ---
+
+## Deployment + Benchmarks
+
+This API is deployed on Render:
+
+- Base URL: https://csvcleaner.onrender.com
+- Docs: https://csvcleaner.onrender.com/docs
+- Health: https://csvcleaner.onrender.com/health
+
+Benchmarks were run against the deployed service after a warm-up request to avoid cold-start skew.
+
+- GET `/health` (k6, 10 VUs, 30s)
+  - p95 latency: 68.16ms
+  - throughput: ~101.10 req/s (~6,066 req/min)
+  - error rate: 0% (0/3043)
+
+- POST `/clean/basic` (50-run file upload benchmark, Windows PowerShell + curl, sample IMDb CSV)
+  - p95 latency: 0.360s
+  - throughput: ~203 req/min
+  - errors: 0/50
 
 ## Endpoints
 
@@ -61,6 +81,7 @@ These were generated using the included sample dataset:
 - `data/raw/messy_IMDB_dataset.csv`
 
 Dataset source (Kaggle):
+
 - https://www.kaggle.com/datasets/davidfuenteherraiz/messy-imdb-dataset
 
 ---
