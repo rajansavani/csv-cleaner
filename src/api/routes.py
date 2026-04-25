@@ -7,6 +7,8 @@ from uuid import uuid4
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from dataclasses import asdict
+
 from src.pipeline.artifacts import (
     cleaned_csv_path,
     read_report_json,
@@ -14,7 +16,8 @@ from src.pipeline.artifacts import (
     write_plan_json,
     write_report_json,
 )
-from src.pipeline.executor import ExecutionError, execute_plan
+from src.pipeline.executor import ExecutionError
+from src.pipeline.loop import IterationRecord, run_clean_loop
 from src.pipeline.planner import PlanError, generate_cleaning_plan
 from src.pipeline.profile import profile_dataframe, read_uploaded_csv
 from src.pipeline.validate import PlanValidationError, ensure_valid_plan
@@ -166,7 +169,7 @@ def plan_cleaning(file: UploadFile = File(...)) -> dict[str, Any]:
     job_id = _new_job_id()
 
     try:
-        plan = generate_cleaning_plan(profile)
+        plan, _ = generate_cleaning_plan(profile)
         plan_validation = ensure_valid_plan(plan, df_columns=list(df.columns))
     except PlanError as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -227,11 +230,8 @@ def clean_llm(file: UploadFile = File(...)) -> dict[str, Any]:
 
     job_id = _new_job_id()
 
-    before = profile_dataframe(df, filename=file.filename)
-
     try:
-        plan = generate_cleaning_plan(before)
-        plan_validation = ensure_valid_plan(plan, df_columns=list(df.columns))
+        result = run_clean_loop(df, filename=file.filename)
     except PlanError as e:
         raise HTTPException(status_code=500, detail=f"planning failed: {e}")
     except PlanValidationError as e:
@@ -243,54 +243,71 @@ def clean_llm(file: UploadFile = File(...)) -> dict[str, Any]:
                 "warnings": e.warnings,
             },
         )
-
-    try:
-        cleaned_df, exec_report = execute_plan(df, plan)
     except ExecutionError as e:
         raise HTTPException(status_code=500, detail=f"execution failed: {e}")
 
-    # attach plan validation warnings to the execution report (if any)
-    if plan_validation.warnings:
-        exec_report.setdefault("warnings", [])
-        exec_report["warnings"].extend([{"type": "plan_validation", **w} for w in plan_validation.warnings])
+    initial_plan = result.iterations[0].plan
+    initial_plan_dict = initial_plan.model_dump()
+    final_exec_report = result.iterations[-1].execution_report
 
-    after = profile_dataframe(cleaned_df, filename=file.filename)
+    after = profile_dataframe(result.final_df, filename=file.filename)
 
-    plan_dict = plan.model_dump()
+    iterations_serialized = [_serialize_iteration(it) for it in result.iterations]
+    final_reflection_dict = result.final_reflection.model_dump()
+    metrics_dict = asdict(result.metrics)
 
     report = {
         "job_id": job_id,
         "filename": file.filename,
         "cleaning_mode": "llm",
-        "plan": plan_dict,
-        "execution_report": exec_report,
-        "before": before,
+        "plan": initial_plan_dict,
+        "execution_report": final_exec_report,
+        "iterations": iterations_serialized,
+        "total_iterations": len(result.iterations),
+        "final_reflection": final_reflection_dict,
+        "metrics": metrics_dict,
+        "before": result.before_profile,
         "after": after,
     }
 
-    cleaned_path = write_cleaned_csv(cleaned_df, job_id)
+    cleaned_path = write_cleaned_csv(result.final_df, job_id)
     report_path = write_report_json(report, job_id)
-    plan_path = write_plan_json(plan_dict, job_id)
+    plan_path = write_plan_json(initial_plan_dict, job_id)
 
     return {
         "job_id": job_id,
         "filename": file.filename,
         "cleaning_mode": "llm",
-        "plan": plan_dict,
+        "plan": initial_plan_dict,
         "plan_validation": {
             "ok": True,
-            "warnings": plan_validation.warnings,
-            "final_columns": plan_validation.final_columns,
+            "warnings": result.initial_plan_validation.warnings,
+            "final_columns": result.initial_plan_validation.final_columns,
         },
-        "execution_report": exec_report,
+        "execution_report": final_exec_report,
+        "iterations": iterations_serialized,
+        "total_iterations": len(result.iterations),
+        "final_reflection": final_reflection_dict,
+        "metrics": metrics_dict,
         "artifacts": {
             "cleaned_csv": str(cleaned_path),
             "report_json": str(report_path),
             "plan_json": str(plan_path),
         },
-        "before": before,
+        "before": result.before_profile,
         "after": after,
-        "cleaned_preview_rows": cleaned_df.head(10).fillna("").to_dict(orient="records"),
+        "cleaned_preview_rows": result.final_df.head(10).fillna("").to_dict(orient="records"),
+    }
+
+
+def _serialize_iteration(it: IterationRecord) -> dict[str, Any]:
+    return {
+        "pass": it.pass_,
+        "triggering_reflection": (
+            it.triggering_reflection.model_dump() if it.triggering_reflection is not None else None
+        ),
+        "plan": it.plan.model_dump(),
+        "execution_report": it.execution_report,
     }
 
 

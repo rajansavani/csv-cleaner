@@ -242,6 +242,7 @@ htmlcov/
 # runtime outputs / artifacts
 outputs/
 data/processed/
+data/demo/
 reports/examples/    # optional: remove if you want tracked examples
 *.log
 

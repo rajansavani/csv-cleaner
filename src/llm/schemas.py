@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -76,4 +76,56 @@ class CleaningPlan(BaseModel):
     @classmethod
     def json_schema(cls) -> dict:
         return cls.model_json_schema()
-    
+
+
+# reflection schemas: produced by the reflector LLM after each cleaning pass
+
+class MarkClean(BaseModel):
+    decision: Literal["mark_clean"] = "mark_clean"
+    reasoning: str = Field(description="Brief explanation of why the data is clean")
+
+class ProposeRevision(BaseModel):
+    decision: Literal["propose_revision"] = "propose_revision"
+    reasoning: str = Field(description="What issues remain and why another pass is needed")
+    revised_plan: CleaningPlan = Field(description="Delta plan addressing remaining issues")
+
+class FlagUnrecoverable(BaseModel):
+    decision: Literal["flag_unrecoverable"] = "flag_unrecoverable"
+    reasoning: str = Field(description="Why further iteration would not help")
+    remaining_issues: list[str] = Field(description="Issues that could not be resolved")
+
+ReflectionDecision = Annotated[
+    MarkClean | ProposeRevision | FlagUnrecoverable,
+    Field(discriminator="decision"),
+]
+
+class ReflectionResponse(BaseModel):
+    result: ReflectionDecision = Field(discriminator="decision")
+
+    @classmethod
+    def json_schema(cls) -> dict:
+        return cls.model_json_schema()
+
+
+# sentinel variants for LoopResult.final_reflection (not produced by the LLM)
+# these capture loop termination reasons that aren't a reflection verdict
+
+class MaxIterationsExceeded(BaseModel):
+    decision: Literal["max_iterations_exceeded"] = "max_iterations_exceeded"
+    iteration_cap: int = Field(description="The cap that was hit")
+    last_verdict: ReflectionDecision | None = Field(
+        default=None,
+        description="The reflection from the final iteration, if one was produced",
+    )
+
+class ReflectionFailed(BaseModel):
+    decision: Literal["reflection_failed"] = "reflection_failed"
+    stage: Literal["llm_call", "json_parse", "schema_validation", "plan_validation", "execution"] = Field(
+        description="Where the failure occurred"
+    )
+    error: str = Field(description="Human-readable error detail")
+
+FinalReflection = Annotated[
+    MarkClean | FlagUnrecoverable | MaxIterationsExceeded | ReflectionFailed,
+    Field(discriminator="decision"),
+]
