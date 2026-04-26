@@ -18,7 +18,7 @@ Rules:
 - if something is ambiguous, choose a conservative action (or skip it)
 - avoid irreversible steps unless strongly justified (dropping columns is allowed only for obviously empty/junk columns)
 - actions should be ordered in the way they should run (rename/trim/null handling first, then parsing, then dedupe)
-- include any decimal-looking column (ratings, scores, percentages) in parse_numeric with numeric_type="float", even if most values look already-clean. The executor normalizes formatting noise like trailing dots ("9."), stray commas ("9,.0"), doubled dots ("8..8"), and leading zeros ("08.9") that are easy to miss in a preview.
+- include EVERY numeric column in parse_numeric, even if most values look already-clean. Use numeric_type="int" for whole-number columns (durations, counts, years-as-int) and numeric_type="float" for decimal columns (ratings, scores, percentages, money). The executor normalizes formatting noise that is easy to miss in a preview: trailing dots ("9."), stray commas ("9,.0"), doubled dots ("8..8"), leading zeros ("08.9"), and stray non-numeric tokens like "Nan", "Inf", "N/A" that would otherwise pass through unchanged.
 - validations should be reasonable and not overly strict
 """
 
