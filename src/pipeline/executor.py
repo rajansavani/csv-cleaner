@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pandas as pd
@@ -163,6 +164,10 @@ def _parse_numeric(
         # normalize weird multiple dots: 8..8 -> 8.8
         cleaned = cleaned.str.replace(r"\.{2,}", ".", regex=True)
 
+        # strip dangling trailing dots that would break float(): "8.7." -> "8.7"
+        # (a bare trailing dot like "9." is handled later for floats)
+        cleaned = cleaned.str.replace(r"(?<=\d\.\d)\.+$", "", regex=True)
+
         # turn empty into ""
         cleaned = cleaned.where(cleaned.str.len() > 0, "")
 
@@ -192,6 +197,26 @@ def _parse_numeric(
     return out, stats
 
 
+_ORDINAL_RE = re.compile(r"(\d+)(st|nd|rd|th)\b", re.IGNORECASE)
+_FILLER_RE = re.compile(r"\b(of|the)\b", re.IGNORECASE)
+_SEP_RE = re.compile(r"[\/\.\s]+")
+
+
+def _normalize_date_string(value: str) -> str:
+    """Normalize a single date string so pd.to_datetime has a better chance."""
+    s = value.strip()
+    if not s:
+        return s
+    s = _ORDINAL_RE.sub(r"\1", s)
+    s = _FILLER_RE.sub(" ", s)
+    s = re.sub(r"\s*-\s*", "-", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"(?<=\d)\s+(?=\d)", "-", s)
+    s = re.sub(r"[\/\.]", "-", s)
+    s = re.sub(r"-+", "-", s)
+    return s
+
+
 def _parse_dates(
     df: pd.DataFrame,
     *,
@@ -202,33 +227,25 @@ def _parse_dates(
     out = df.copy()
     per_col: dict[str, dict[str, Any]] = {}
 
-    fmt = output_format or "%Y-%m-%d"
+    format_map = {"iso_date": "%Y-%m-%d", "year": "%Y"}
+    fmt = format_map.get(output_format, output_format or "%Y-%m-%d")
 
     for col in columns:
         if col not in out.columns:
             per_col[col] = {"status": "skipped", "reason": "missing column"}
             continue
 
-        before = out[col]
+        before = out[col].astype(str).fillna("")
+        normalized = before.map(_normalize_date_string).replace("", pd.NA)
 
-        cleaned = before.replace("", pd.NA)
+        # format="mixed" lets each row pick its own format; without it, pd.to_datetime
+        # infers one format from the first value and applies it strictly to the rest
+        # try the configured dayfirst preference first, then the opposite as a fallback
+        # for cells that didn't parse -> handles columns mixing US and EU styles
+        primary = pd.to_datetime(normalized, errors="coerce", dayfirst=day_first, format="mixed")
+        fallback = pd.to_datetime(normalized, errors="coerce", dayfirst=not day_first, format="mixed")
+        dt = primary.fillna(fallback)
 
-        # pandas removed infer_datetime_format in newer versions
-        try:
-            dt = pd.to_datetime(
-                cleaned,
-                errors="coerce",
-                dayfirst=day_first,
-                infer_datetime_format=True,  # older pandas only
-            )
-        except TypeError:
-            dt = pd.to_datetime(
-                cleaned,
-                errors="coerce",
-                dayfirst=day_first,
-            )
-
-        # keep dates as strings for consistent json + downstream validation
         try:
             formatted = dt.dt.strftime(fmt).fillna("")
         except Exception as e:

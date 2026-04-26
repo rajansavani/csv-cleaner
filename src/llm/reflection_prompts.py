@@ -71,14 +71,30 @@ Decision rules:
 - Choose propose_revision only when there is a concrete next action that the
   available action types can perform.
 - Use flag_unrecoverable when the data has structural problems no further
-  pass would fix.
+  pass would fix. Plain missingness (empty cells in a column) is unrecoverable
+  by the available actions — none of them can impute or fill missing values.
+  Either mark_clean (if the column is mostly populated) or flag_unrecoverable
+  (if the gap matters); do NOT propose another standardize_nulls pass.
+- Domain-legitimate categorical values are NOT nulls. Examples: MPAA-style
+  ratings ("Approved", "Unrated", "Not Rated", "TV-MA", "NC-17"), country
+  codes, genre labels. Only propose standardize_nulls for clear sentinel
+  tokens like "#N/A", "N/A", "NA", "NULL", "None", "-", "?", "unknown".
+- A standardize_nulls pass that has already run with the right tokens does not
+  need to run again. If the same tokens are still present, the action ran;
+  if new tokens appear, list only the NEW ones.
 
 CRITICAL -> propose_revision.revised_plan is a DELTA (incremental plan):
 - It must contain ONLY new actions that address the issues remaining AFTER the
   prior plan ran. Do NOT re-list actions from the prior plan.
 - The delta plan will be applied directly to the ALREADY-CLEANED dataframe;
   re-running prior actions would do redundant work or undo progress.
-- Use the same 7 action types as the planner. Do not invent new actions.
+- Use ONLY the following 7 action names exactly (any other name is invalid and
+  will be rejected): "drop_columns", "rename_columns", "standardize_nulls",
+  "parse_numeric", "parse_dates", "trim_whitespace", "deduplicate_rows".
+- Do NOT invent new action names. In particular, "fill_missing", "impute",
+  "replace_values", "cast_type", and "normalize" do not exist. To replace
+  invalid/sentinel values with empty, use "standardize_nulls" with the offending
+  tokens listed in `null_tokens`.
 - Do not invent columns that do not exist in the cleaned data's profile.
 - Keep the delta minimal: a few targeted actions, not a full re-plan.
 

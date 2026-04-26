@@ -1,11 +1,29 @@
 from __future__ import annotations
 
 import csv
+import re
 from io import StringIO
 from typing import Any, Iterable
 
 import pandas as pd
 from fastapi import HTTPException, UploadFile
+
+# pandas auto-names blank headers as "Unnamed: 0", "Unnamed: 1", etc.
+_UNNAMED_RE = re.compile(r"^Unnamed:\s*\d+$")
+
+
+def _drop_blank_unnamed_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop pandas-generated Unnamed columns when they contain no data."""
+    to_drop: list[str] = []
+    for col in df.columns:
+        if not _UNNAMED_RE.match(str(col)):
+            continue
+        series = df[col].astype(str).str.strip()
+        if (series == "").all():
+            to_drop.append(col)
+    if to_drop:
+        df = df.drop(columns=to_drop)
+    return df
 
 
 def _sniff_delimiter(sample_text: str) -> str | None:
@@ -39,7 +57,7 @@ def _try_read_with_delimiters(text: str, delimiters: Iterable[str]) -> pd.DataFr
             if df.shape[1] <= 1 and delim != ",":
                 continue
 
-            return df
+            return _drop_blank_unnamed_columns(df)
         except Exception as e:
             last_err = e
 
